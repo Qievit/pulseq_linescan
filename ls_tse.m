@@ -21,7 +21,7 @@ feDir = 'x'; peDir = 'y'; ssDir = 'z';
 TE = 15e-3;
 TR = 1;
 
-fov = 192e-3; Nfe = 64; Nlin=10;
+fov = 192e-3; Nfe = 64; Nlin=1;
 sliceThickness = 3e-3;
 alphaRo = 180;
 adcDur = 4.48e-3;
@@ -34,7 +34,7 @@ dwType = 'mono'; % 'mono' 'dbipolar'
 dwAmp = gamma*[ 40e-3 0 0;
                 30e-3 0 0;
                 40e-3 0 0]; % DWI gradient amplitude. FE PE SS [Hz/m] 
-nb0 = 0;
+nb0 = 2;
 dwDur = 12e-3; % DWI gradient duration. For bipolar: single lobe
 Delta = 10e-3; % distance between diffusion gradients NOT including the gradient itself
 
@@ -137,9 +137,11 @@ for dir = 1:size(dwAmp,1)
     seq.addBlock(feC1,mr.makeLabel('SET', 'LIN', 1) )
     seq.addBlock(gfe,adc)
     ssC1.delay=0; ssC1.delay = delayRo - mr.calcDuration(ssC1);
-    seq.addBlock(ssC1,feC2)
+    if Nlin-1 == 0; seq.addBlock(feC2);
+    else;seq.addBlock(ssC1,feC2);end
 
-    for i = 1:Nlin
+
+    for i = 1:Nlin-1
         seq.addBlock(rfRo,gssAdj)
         seq.addBlock(ssC2,feC1,delayRo,mr.makeLabel('SET', 'LIN', 1) )
         seq.addBlock(gfe,adc)
