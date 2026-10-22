@@ -13,38 +13,39 @@ system = mr.opts('maxGrad', 45,'GradUnit', 'mT/m', ... % SKYRA
     'MaxSlew', 80, 'SlewUnit', 'T/m/s', ...
     'rfRingdownTime', 100e-6, 'rfDeadTime', 100e-6, 'adcDeadTime', 100e-6); 
 seq=mr.Sequence(system);
-gamma = 42.58e6/(2*pi) * 3; % [Hz] at 3T gyromagnetic ratio
+gamma = 42.58e6; % [Hz] at 3T gyromagnetic ratio
 
 feDir = 'x'; peDir = 'y'; ssDir = 'z';
 
 % Sequence parameters
-TE = 15e-3;
+% TE = 1e-3;
 TR = 1;
 
 fov = 192e-3; Nfe = 64; Nlin=1;
 sliceThickness = 3e-3;
 alphaRo = 180;
 adcDur = 4.48e-3;
-rfDur = 3e-3;
+rfDurRef = 2.5e-3;
+rfDurEx = 2e-3;
 
 deltak = 1/fov;
 
 %% DWI
 dwType = 'mono'; % 'mono' 'dbipolar'
-dwAmp = gamma*[ 40e-3 0 0;
-                30e-3 0 0;
-                40e-3 0 0]; % DWI gradient amplitude. FE PE SS [Hz/m] 
-nb0 = 2;
-dwDur = 12e-3; % DWI gradient duration. For bipolar: single lobe
-Delta = 10e-3; % distance between diffusion gradients NOT including the gradient itself
+dwAmp = gamma*[ 44e-3 10e-3 0;
+                30e-3 0 20e-3;
+                40e-3 20e-3 0]; % DWI gradient amplitude. FE PE SS [Hz/m] 
+nb0 = 0;
+dwDur = 4e-3; % DWI gradient duration. For bipolar: single lobe
+Delta = (6-4+6-4+2.5)*1e-3; % distance between diffusion gradients NOT including the gradient itself
 
 dwAmp = [repmat([0 0 0],nb0,1) ; dwAmp];
 
 %% Initialize RF pulses
-[rfEx, gssExNorm] = mr.makeSincPulse(90*pi/180,system,'Duration',rfDur,'SliceThickness',sliceThickness, ...
+[rfEx, gssExNorm] = mr.makeSincPulse(90*pi/180,system,'Duration',rfDurEx,'SliceThickness',sliceThickness, ...
     'apodization',0.5,'timeBwProduct',4,'PhaseOffset',pi/2,'use','excitation');
 
-[rfRo, gssRo] = mr.makeSincPulse(alphaRo*pi/180,system,'Duration',rfDur,'SliceThickness',sliceThickness,...
+[rfRo, gssRo] = mr.makeSincPulse(alphaRo*pi/180,system,'Duration',rfDurRef,'SliceThickness',sliceThickness,...
     'apodization',0.5,'timeBwProduct',4,'use','refocusing');
 
 rfRo.delay = system.rfDeadTime;
@@ -57,7 +58,7 @@ cs1 = ceil( csMax/system.maxSlew/system.gradRasterTime )*system.gradRasterTime;
 cs2 = ceil( abs(csMax - gssRo.amplitude)/system.maxSlew/system.gradRasterTime )*system.gradRasterTime;
 ssC1 = mr.makeExtendedTrapezoid(ssDir,system,'times',[0 cs1 cs1+cs2],'amplitudes',[0 csMax gssRo.amplitude]);
 ssC2 = mr.makeExtendedTrapezoid(ssDir,system,'times',[0 cs2 cs1+cs2],'amplitudes',[gssRo.amplitude csMax 0]);
-gssAdj = mr.makeExtendedTrapezoid(ssDir,system,'times',[0 rfDur+system.rfDeadTime+system.rfRingdownTime],'amplitudes',[gssRo.amplitude gssRo.amplitude]);
+gssAdj = mr.makeExtendedTrapezoid(ssDir,system,'times',[0 rfDurEx+system.rfDeadTime+system.rfRingdownTime],'amplitudes',[gssRo.amplitude gssRo.amplitude]);
 
 % FE gradients
 gfeAmp = mr.makeTrapezoid(feDir,system,'FlatArea',Nfe*deltak,'FlatTime',adcDur);
@@ -71,38 +72,43 @@ feC2 = mr.makeExtendedTrapezoid(feDir,'times',[0 cf3 cf2+cf3 cf1+cf2+cf3],'ampli
 gfe = mr.makeExtendedTrapezoid(feDir,'times',[0 adcDur+2*system.adcDeadTime],'amplitudes',[gfeAmp.amplitude gfeAmp.amplitude]);
 adc = mr.makeAdc(Nfe,system,'Duration',adcDur,'Delay',system.adcDeadTime);
 
-ieTE = rfDur + mr.calcDuration(gfe) + max([mr.calcDuration(feC1),mr.calcDuration(ssC1)])*2;
-disp(['Using interecho spacing = ' num2str(ieTE*1e3) ' ms'])
-delayRo = max([mr.calcDuration(feC1),mr.calcDuration(ssC1)]);
-
 % Rephasing and prephasing
-gfePreph = mr.makeTrapezoid(feDir,system,'Area',gfe.area/2 + feC1.area,'Duration',delayRo + mr.calcDuration(adc)/2);
-gssReph = mr.makeTrapezoid(peDir,system,'Area',-gssExNorm.area/2,'Duration',delayRo + mr.calcDuration(adc)/2); % for the excitation pulse
-gssPreph = mr.makeTrapezoid(ssDir,system,'Area',-(gssRo.area + ssSpoilingArea)/2,'Duration',delayRo + mr.calcDuration(adc)/2); % For the refocussing pulse
-gssEx = mr.makeExtendedTrapezoid(peDir,'times',[0 gssExNorm.riseTime gssExNorm.riseTime+gssExNorm.flatTime mr.calcDuration(gssExNorm) mr.calcDuration(gssExNorm)+gssReph.riseTime mr.calcDuration(gssExNorm)+gssReph.riseTime+gssReph.flatTime mr.calcDuration(gssExNorm)+mr.calcDuration(gssReph)], ...
-        'amplitudes',[0 gssExNorm.amplitude gssExNorm.amplitude 0 gssReph.amplitude gssReph.amplitude 0]);
+% gfePreph = mr.makeTrapezoid(feDir,system,'Area',gfe.area/2 + feC1.area,'Duration',delayRo + mr.calcDuration(adc)/2);
+gfePreph = mr.makeTrapezoid(feDir,system,'Area',gfe.area/2 + feC1.area);
+% gssReph = mr.makeTrapezoid(peDir,system,'Area',-gssExNorm.area/2,'Duration',delayRo + mr.calcDuration(adc)/2); % for the excitation pulse
+gssReph = mr.makeTrapezoid(peDir,system,'Area',-gssExNorm.area/2); % for the excitation pulse
+% gssPreph = mr.makeTrapezoid(ssDir,system,'Area',-(gssRo.area + ssSpoilingArea)/2,'Duration',delayRo + mr.calcDuration(adc)/2); % For the refocussing pulse
+% gssEx = mr.makeExtendedTrapezoid(peDir,'times',[0 gssExNorm.riseTime gssExNorm.riseTime+gssExNorm.flatTime mr.calcDuration(gssExNorm) mr.calcDuration(gssExNorm)+gssReph.riseTime mr.calcDuration(gssExNorm)+gssReph.riseTime+gssReph.flatTime mr.calcDuration(gssExNorm)+mr.calcDuration(gssReph)], ...
+%         'amplitudes',[0 gssExNorm.amplitude gssExNorm.amplitude 0 gssReph.amplitude gssReph.amplitude 0]);
+gssEx = mr.makeExtendedTrapezoid(peDir,'times',[0 gssExNorm.riseTime gssExNorm.riseTime+gssExNorm.flatTime mr.calcDuration(gssExNorm) mr.calcDuration(gssExNorm)+gssReph.riseTime mr.calcDuration(gssExNorm)+mr.calcDuration(gssReph)], ...
+    'amplitudes',[0 gssExNorm.amplitude gssExNorm.amplitude 0 gssReph.amplitude 0]);
 gssPreph.delay = mr.calcDuration(gssExNorm);
 gfePreph.delay = mr.calcDuration(gssExNorm);
 
 % DW/ARFI gradients
 if sum(strcmp(dwType,{'mono','sbipolar','dbipolar'}))
     for dir=1:size(dwAmp,1)
-        dwTemplate = mr.makeTrapezoid(ssDir,system,'Amplitude',max(dwAmp(dir,:)),'Duration',dwDur/(1+sum(strcmp(dwType,{'sbipolar','dbipolar'}))));
-        dwTimes = [0 dwTemplate.riseTime dwTemplate.riseTime+dwTemplate.flatTime mr.calcDuration(dwTemplate)];
+        rampTime = dwAmp(dir,:)./(system.maxSlew*1);
+        rampTime = rampTime + [dwAmp(dir,:)==0].*max(rampTime);
+        rampTime = ceil(rampTime./seq.gradRasterTime).*seq.gradRasterTime;
+        dwTemplate = mr.makeTrapezoid(ssDir,system,'Amplitude',max(dwAmp(dir,:)),'Duration',dwDur/(1+sum(strcmp(dwType,{'sbipolar','dbipolar'}))),'riseTime',rampTime,'fallTime',rampTime);
+        % dwTimes = [0 dwTemplate.riseTime dwTemplate.riseTime+dwTemplate.flatTime mr.calcDuration(dwTemplate)];
+        dwTimes = [[0 0 0]' dwTemplate.riseTime' dwTemplate.flatTime'+rampTime' mr.calcDuration(dwTemplate)' ];
         dwAmplitudes = [[0 0 0]' dwAmp(dir,:)' dwAmp(dir,:)' [0 0 0]'];
         if sum(strcmp(dwType,{'sbipolar','dbipolar'}))
             dwTimes = [dwTimes dwTimes(2:end)+mr.calcDuration(dwTemplate)];
             dwAmplitudes = [dwAmplitudes -dwAmplitudes(:,2:end)];
         end
-        dwFe{dir} = mr.makeExtendedTrapezoid(feDir,system,'times',dwTimes,'amplitudes',dwAmplitudes(1,:));
-        dwPe{dir} = mr.makeExtendedTrapezoid(peDir,system,'times',dwTimes,'amplitudes',dwAmplitudes(2,:));
-        dwSs{dir} = mr.makeExtendedTrapezoid(ssDir,system,'times',dwTimes,'amplitudes',dwAmplitudes(3,:));
+        dwFe{dir} = mr.makeExtendedTrapezoid(feDir,system,'times',dwTimes(1,:),'amplitudes',dwAmplitudes(1,:));
+        dwPe{dir} = mr.makeExtendedTrapezoid(peDir,system,'times',dwTimes(2,:),'amplitudes',dwAmplitudes(2,:));
+        dwSs{dir} = mr.makeExtendedTrapezoid(ssDir,system,'times',dwTimes(3,:),'amplitudes',dwAmplitudes(3,:));
     end
 end
 
+delayRo = max([mr.calcDuration(feC1),mr.calcDuration(ssC1),mr.calcDuration(gssReph),mr.calcDuration(gfePreph)-gfePreph.delay]);
 feC1.delay = delayRo - mr.calcDuration(feC1);
 TRdelay = TR ... 
-         -(mr.calcDuration(gssEx,gssPreph,gfePreph) + Delta + dwFe{1}.shape_dur*2) ...
+         -(mr.calcDuration(gssEx,gfePreph) + Delta + dwFe{1}.shape_dur*2) ...
          -(delayRo*2 + mr.calcDuration(adc)) ...
          -(mr.calcDuration(gssAdj) + delayRo*2 + mr.calcDuration(adc))*Nlin;
 
@@ -111,7 +117,7 @@ seq.addBlock(mr.makeLabel('SET','SLC',0))
 seq.addBlock(mr.makeLabel('SET','REP',0))
 
 for dir = 1:size(dwAmp,1)
-    seq.addBlock(rfEx,gssEx,gssPreph,gfePreph)
+    seq.addBlock(rfEx,gssEx,gfePreph)
     
     switch dwType
         case 'mono'
@@ -139,7 +145,6 @@ for dir = 1:size(dwAmp,1)
     ssC1.delay=0; ssC1.delay = delayRo - mr.calcDuration(ssC1);
     if Nlin-1 == 0; seq.addBlock(feC2);
     else;seq.addBlock(ssC1,feC2);end
-
 
     for i = 1:Nlin-1
         seq.addBlock(rfRo,gssAdj)
